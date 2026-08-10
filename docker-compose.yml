@@ -1,0 +1,10 @@
+services:
+  vps_lab:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: vps_lab
+    ports:
+      - "2222:22"
+    volumes:
+      - ./data:/data
