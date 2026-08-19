@@ -7,5 +7,6 @@ services:
     ports:
       - "2222:22"
     volumes:
-      - ./data:/data
-      
+      - ../data:/data
+      - ../scripts:/scripts/.
+    working_dir: /scripts/.
