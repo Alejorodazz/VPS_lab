@@ -1,8 +1,8 @@
-# Documentacion Tecnica - VPS Lab
+# Documentación Técnica - VPS Lab
 
-## Descripcion general
+## Descripción general
 
-`VPS_lab` es un entorno de laboratorio basado en Docker que levanta un contenedor `Ubuntu 24.04` con servicio `OpenSSH` habilitado. Su objetivo es ofrecer una instancia simple y accesible por SSH para pruebas operativas, ejercicios de administración básica y validaciones de conectividad.
+`VPS_lab` es un entorno de laboratorio basado en Docker que levanta un contenedor `Ubuntu LTS` con servicio `OpenSSH` habilitado. Su objetivo es ofrecer una instancia simple y accesible por SSH para pruebas operativas, ejercicios de administración básica y validaciones de conectividad.
 
 La infraestructura actual esta definida únicamente por:
 
@@ -16,17 +16,20 @@ El proyecto despliega un solo servicio:
 | Componente | Función |
 | --- | --- |
 | `vps_lab` | Contenedor principal del laboratorio |
-| `ubuntu:24.04` | Imagen base del sistema operativo |
+| `ubuntu:${BASE_IMAGE}` | Imagen base parametrizable del sistema operativo |
 | `openssh-server` | Servicio de acceso remoto por SSH |
 | Puerto `2222` del host | Puerto expuesto para conectarse al puerto `22` del contenedor |
 | Volumen `/data` | Persistencia de archivos del laboratorio |
+| Volumen `/scripts` | Acceso a scripts de aprovisionamiento desde el host |
+| `working_dir: /scripts/.` | Directorio de trabajo por defecto dentro del contenedor |
 
 Flujo operativo:
 
 1. Docker Compose construye la imagen desde el contexto raíz del repositorio.
-2. El `dockerfile` instala utilidades base y habilita `sshd`.
+2. El `dockerfile` parametriza la versión de Ubuntu mediante `ARG BASE_IMAGE=24.04`, instala utilidades base y habilita `sshd`.
 3. El contenedor publica el puerto `22` interno como `2222` en el host.
-4. El volúmen montado permite conservar datos fuera del contenedor.
+4. Docker monta `data/` en `/data` para persistencia y `scripts/` en `/scripts` para ejecutar aprovisionamiento desde el contenedor.
+5. El directorio de trabajo por defecto queda apuntando a `/scripts/.`.
 
 ## Estructura del repositorio
 
@@ -60,7 +63,9 @@ Configuración actual:
 - Construye la imagen usando como contexto `..` y como archivo de build `docker/dockerfile`.
 - Asigna el nombre fijo del contenedor: `vps_lab`.
 - Expone `2222:22`.
-- Monta `./data:/data`.
+- Monta `../data:/data`.
+- Monta `../scripts:/scripts/.`.
+- Define `working_dir: /scripts/.` para facilitar la ejecución de scripts dentro del contenedor.
 
 ### 2. Imagen Docker
 
@@ -68,14 +73,16 @@ Archivo: [`docker/dockerfile`]
 
 Durante la construcción se realizan estas acciones:
 
-1. Se usa `ubuntu:24.04` como base.
-2. Se instalan paquetes:
+1. Se define `ARG BASE_IMAGE=24.04` para parametrizar la versión base de Ubuntu.
+2. Se usa `ubuntu:${BASE_IMAGE}` como imagen base del stage `VPS_LAB`.
+3. Se instalan paquetes:
    `openssh-server`, `sudo`, `curl`, `nano` y `net-tools`.
-3. Se crea `/var/run/sshd`.
-4. Se define la contraseña del usuario `root` como `password`.
-5. Se habilita `PermitRootLogin yes` en `sshd_config`.
-6. Se expone el puerto `22`.
-7. Se inicia `sshd` en primer plano con `CMD ["/usr/sbin/sshd", "-D"]`.
+4. Se crea `/var/run/sshd`.
+5. Se define la contraseña del usuario `root` como `password`.
+6. Se habilita `PermitRootLogin yes` en `sshd_config`.
+7. Se expone el puerto `22`.
+8. Se mantiene `sshd` como proceso principal con `CMD ["/usr/sbin/sshd", "-D"]`.
+9. Existen líneas comentadas para copiar `/scripts` a la imagen o usar `bootstrap_vps.sh` como comando alternativo, pero actualmente no forman parte del flujo activo.
 
 ## Despliegue
 
@@ -105,7 +112,7 @@ docker compose -f docker/docker-compose.yml down
 
 ## Scripts de aprovisionamiento
 
-Se agrego una carpeta de automatizaciÓn para configuracion inicial de una VPS Linux basada en Ubuntu LTS:
+Se agrego una carpeta de automatización para configuración inicial de una VPS Linux basada en Ubuntu LTS:
 
 - [`scripts/bootstrap_vps.sh`]
 - [`scripts/01_install_dependencies.sh`]
@@ -126,7 +133,7 @@ Los scripts validan el sistema operativo antes de ejecutar cambios y fallan si l
 Ejemplo de uso completo:
 
 ```bash
-sudo bash scripts/bootstrap_vps.sh devops 'ClaveTemporal123' 2222
+sudo bash /scripts/bootstrap_vps.sh devops 'ClaveTemporal123' 2222
 ```
 
 Ejemplos individuales:
@@ -153,18 +160,38 @@ Credenciales actuales:
 
 ## Persistencia de datos
 
-El contenedor monta el directorio `/data` contra la ruta declarada en `docker/docker-compose.yml`.
-
-Nota tecnica importante:
-
-- Como el archivo `docker-compose.yml` se encuentra dentro de la carpeta `docker/`, la ruta relativa `./data:/data` se resuelve actualmente como `docker/data` en el host.
-- La carpeta `data/` ubicada en la raiz del repositorio no esta siendo usada por esta definicion de Compose.
-
-Si se desea que la persistencia apunte a la carpeta raiz `data/`, la linea del volumen deberia ajustarse a:
+El contenedor monta la carpeta `data/` de la raíz del proyecto hacia `/data`:
 
 ```yaml
 volumes:
   - ../data:/data
+```
+
+Esto corrige la resolución de ruta respecto a la versión anterior y hace que la persistencia apunte explícitamente a la carpeta `data/` del repositorio.
+
+Además, los scripts locales se montan en el contenedor con:
+
+```yaml
+volumes:
+  - ../scripts:/scripts/.
+```
+
+Gracias a esto, los archivos dentro de `scripts/` pueden ejecutarse sin reconstruir la imagen.
+
+## Ejecución de scripts en el contenedor
+
+Como `docker-compose.yml` define `working_dir: /scripts/.`, el contenedor queda posicionado en esa ruta al iniciar una sesión interactiva.
+
+Ejemplo:
+
+```powershell
+docker exec -it vps_lab bash
+```
+
+Dentro del contenedor se pueden ejecutar directamente scripts como:
+
+```bash
+bash bootstrap_vps.sh devops 'ClaveTemporal123' 2222
 ```
 
 ## Seguridad
@@ -187,13 +214,11 @@ Recomendaciones mínimas antes de usar fuera de un entorno controlado:
 
 ## Observaciones operativas
 
-- La definicion de infraestructura fue validada con `docker compose config`.
-- El contenedor esta pensado como base de practica, no como VPS endurecido para ambientes reales.
+- La imagen sigue arrancando con `sshd`; los scripts de aprovisionamiento están disponibles por volumen y no se ejecutan automáticamente al iniciar el contenedor.
+- El contenedor esta pensado como base de práctica, no como VPS endurecido para ambientes reales.
 
 ## Posibles mejoras
 
 1. Crear un usuario administrativo no root.
 2. Incorporar claves SSH por medio de volumen o build args.
 3. Agregar `healthcheck` al servicio.
-4. Separar claramente la carpeta de datos activa para evitar confusion entre `data/` y `docker/data/`.
-
